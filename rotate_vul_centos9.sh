@@ -1,40 +1,52 @@
 #!/bin/bash
+#
+# rotate_vul_centos9.sh - Xoay (rotate) proxy IPv6 trên CentOS 9 Stream x64
+#
+
+set -e
 
 WORKDIR="/home/proxy-installer"
 WORKDATA="${WORKDIR}/data.txt"
+PROXYCFG="/usr/local/etc/3proxy/3proxy.cfg"
 IFACE=$(ip -o -4 route show to default | awk '{print $5}')
 
-# Hàm xoá tất cả proxy hiện tại
-clear_proxy_and_file() {
-    echo "" > /usr/local/etc/3proxy/3proxy.cfg
-    echo "" > $WORKDIR/data.txt
-    echo "" > $WORKDIR/proxy.txt
+mkdir -p "$WORKDIR"
 
-    chmod +x "${WORKDIR}/boot_ifconfig_delete.sh"
-    bash "${WORKDIR}/boot_ifconfig_delete.sh"
-
-    ps aux | grep '[3]proxy' | awk '{print $2}' | xargs -r kill -9
-    systemctl restart NetworkManager
-
-    echo "" > ${WORKDIR}/boot_ifconfig.sh
+# 1) Hàm xóa toàn bộ IPv6 cũ có cùng prefix
+clear_old_ipv6() {
+    local prefix="$1"
+    echo "🔄 Xóa tất cả IPv6 cũ trên interface $IFACE với prefix $prefix..."
+    # Lấy danh sách mọi địa chỉ inet6 có prefix, sau đó xóa
+    ip -6 addr show dev "$IFACE" | \
+      awk -v pfx="$prefix" '$1=="inet6" && $2 ~ "^"pfx {print $2}' | \
+      while read -r old; do
+          ip -6 addr del "$old" dev "$IFACE"
+      done
 }
 
-# Hàm sinh chuỗi ngẫu nhiên
+# 2) Hàm sinh chuỗi ngẫu nhiên 5 ký tự
 random() {
     tr </dev/urandom -dc A-Za-z0-9 | head -c5
     echo
 }
 
-# Sinh địa chỉ IPv6 ngẫu nhiên từ subnet
+# 3) Mảng hex để sinh phần suffix IPv6
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
 gen64() {
     ip64() {
-        echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"
+        printf "%s" "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"
     }
     echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
 }
 
-# Sinh cấu hình 3proxy
+# 4) Hàm sinh dữ liệu proxy mới: user/pass, IPv4, port, IPv6
+gen_data() {
+    seq "$FIRST_PORT" "$LAST_PORT" | while read -r port; do
+        echo "usr$(random)/pass$(random)/$IP4/$port/$(gen64 "$IP6")"
+    done > "$WORKDATA"
+}
+
+# 5) Hàm sinh file cấu hình 3proxy mới dựa trên data.txt
 gen_3proxy() {
     cat <<EOF
 daemon
@@ -45,70 +57,76 @@ setgid 65535
 setuid 65535
 flush
 auth strong
-users $(awk -F "/" 'BEGIN{ORS="";} {print $1 ":CL:" $2 " "}' ${WORKDATA})
-$(awk -F "/" '{print "auth strong\nallow " $1 "\nproxy -6 -n -a -p" $4 " -i" $3 " -e"$5"\nflush\n"}' ${WORKDATA})
+users $(awk -F "/" 'BEGIN{ORS="";} {printf "%s:CL:%s ", \$1, \$2}' "${WORKDATA}")
+$(awk -F "/" '{print "auth strong\nallow " $1 "\nproxy -6 -n -a -p"$4" -i"$3" -e"$5"\nflush\n"}' "${WORKDATA}")
 EOF
 }
 
-# Ghi danh sách proxy vào file để người dùng sử dụng
+# 6) Hàm ghi file proxy.txt (host:port:user:pass) cho người dùng
 gen_proxy_file_for_user() {
-    awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2 }' ${WORKDATA} > "$WORKDIR/proxy.txt"
+    awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2}' "${WORKDATA}" > "$WORKDIR/proxy.txt"
 }
 
-# Tạo dữ liệu ngẫu nhiên cho proxy
-gen_data() {
-    seq $FIRST_PORT $LAST_PORT | while read -r port; do
-        echo "usr$(random)/pass$(random)/$IP4/$port/$(gen64 $IP6)"
-    done
-}
+# --- Bắt đầu chạy rotate ---
 
-# Tạo script cấu hình địa chỉ IPv6
-gen_ifconfig() {
-    awk -F "/" -v iface="$IFACE" '{print "ip -6 addr add " $5 "/64 dev " iface}' ${WORKDATA}
-}
+# A) Lấy prefix IPv6 hiện tại (4 block đầu)
+IP6_FULL=$(curl -6 -s icanhazip.com)
+IP6=$(echo "$IP6_FULL" | cut -f1-4 -d':')
+if [[ -z "$IP6" ]]; then
+    echo "❌ Không lấy được prefix IPv6."
+    exit 1
+fi
 
-# Tạo script xóa địa chỉ IPv6
-gen_ifconfig_delete() {
-    awk -F "/" -v iface="$IFACE" '{print "ip -6 addr del " $5 "/64 dev " iface}' ${WORKDATA}
-}
+# B) Xóa IPv6 cũ trên interface
+clear_old_ipv6 "$IP6"
 
-# --- Bắt đầu thực thi ---
-mkdir -p "$WORKDIR"
-clear_proxy_and_file
+# C) Dừng dịch vụ 3proxy (nếu đang chạy)
+echo "⏸️ Tạm dừng 3proxy..."
+systemctl stop 3proxy || true
 
+# D) Lấy IPv4 và hỏi số lượng proxy
 IP4=$(curl -4 -s icanhazip.com)
-IP6=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
-
-echo "Internal IP = ${IP4}, IPv6 Prefix = ${IP6}"
-echo "How many proxy do you want to create?"
-read COUNT
+if [[ -z "$IP4" ]]; then
+    echo "❌ Không lấy được IPv4."
+    exit 1
+fi
+echo "🔍 IPv4 hiện tại: $IP4"
+echo "🔍 IPv6 prefix: $IP6"
+echo -n "How many proxy do you want to create?"
+read -r COUNT
+if ! [[ "$COUNT" =~ ^[0-9]+$ ]]; then
+    echo "❌ Số lượng không hợp lệ."
+    exit 1
+fi
 
 FIRST_PORT=10000
-LAST_PORT=$(($FIRST_PORT + $COUNT - 1))
+LAST_PORT=$(( FIRST_PORT + COUNT - 1 ))
 
-# Tạo dữ liệu proxy
-gen_data > "${WORKDATA}"
+# E) Tạo data.txt mới
+echo "➡️ Tạo file dữ liệu proxy (data.txt)..."
+gen_data
 
-# Tạo script ifconfig thêm/xóa
-gen_ifconfig > "${WORKDIR}/boot_ifconfig.sh"
-gen_ifconfig_delete > "${WORKDIR}/boot_ifconfig_delete.sh"
-chmod +x "${WORKDIR}/boot_ifconfig.sh" "${WORKDIR}/boot_ifconfig_delete.sh"
-
-# Tạo file cấu hình 3proxyMore actions
-gen_3proxy > /usr/local/etc/3proxy/3proxy.cfg
-
-# Thêm IPv6 vào interface
+# F) Thêm IPv6 mới lên interface
+echo "➡️ Thêm IPv6 mới lên interface $IFACE..."
+awk -F "/" -v iface="$IFACE" '{print "ip -6 addr add " $5 "/64 dev "iface}' "${WORKDATA}" > "${WORKDIR}/boot_ifconfig.sh"
+chmod +x "${WORKDIR}/boot_ifconfig.sh"
 bash "${WORKDIR}/boot_ifconfig.sh"
 
-# Khởi động lại 3proxy
+# G) Cập nhật cấu hình 3proxy mới
+echo "➡️ Cập nhật cấu hình 3proxy..."
+gen_3proxy > "$PROXYCFG"
+chmod 644 "$PROXYCFG"
+
+# H) Khởi động lại 3proxy
+echo "➡️ Khởi động lại dịch vụ 3proxy..."
 ulimit -n 10048
 systemctl daemon-reload
-systemctl restart 3proxy
+systemctl start 3proxy
 
-# Ghi file cho người dùng
+# I) Ghi file proxy.txt cho user tải xuống
 gen_proxy_file_for_user
 
-echo "✅ Xoay proxy thành công!"
-echo "- Danh sách proxy: $WORKDIR/proxy.txt"
-echo "- Chạy lại IPv6 khi reboot: bash ${WORKDIR}/boot_ifconfig.sh"
+echo "✅ Rotate proxy hoàn tất!"
+echo "- File danh sách proxy: $WORKDIR/proxy.txt"
+echo "- Để tự động thêm IPv6 sau reboot, chạy: bash $WORKDIR/boot_ifconfig.sh"
 echo "Rotate Done"
