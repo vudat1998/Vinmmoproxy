@@ -92,8 +92,9 @@ if [[ -z "$IP4" ]]; then
 fi
 echo "🔍 IPv4 hiện tại: $IP4"
 echo "🔍 IPv6 prefix: $IP6"
-echo "How many proxy do you want to create?"
-read -r COUNT
+echo "🔍 IPv4 hiện tại: $IP4"
+echo "🔍 IPv6 prefix: $IP6"
+read -rp "How many proxy do you want to create? " COUNT
 if ! [[ "$COUNT" =~ ^[0-9]+$ ]]; then
     echo "❌ Số lượng không hợp lệ."
     exit 1
