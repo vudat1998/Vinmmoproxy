@@ -1,8 +1,8 @@
-#!/bin/bashAdd commentMore actions
+#!/bin/bash
 
 WORKDIR="/home/proxy-installer"
 WORKDATA="${WORKDIR}/data.txt"
-IFACE=$(ip -o -4 route show to default | awk '{print $5}')
+IFACE=$(ip -o -4 route show to default | awk '{print $5}')More actions
 
 # Hàm xoá tất cả proxy hiện tại
 clear_proxy_and_file() {
