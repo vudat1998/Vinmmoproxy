@@ -6,23 +6,29 @@ PROXYTXT="${WORKDIR}/proxy.txt"
 CFG3PROXY="/usr/local/etc/3proxy/3proxy.cfg"
 IFACE=$(ip -o -4 route show to default | awk '{print $5}')
 
+# --- Hàm kiểm tra và cài đặt gói cần thiết ---
+check_requirements() {
+    echo "[*] Kiểm tra các gói cần thiết..."
+    yum install -y net-tools curl iproute >/dev/null 2>&1
+}
+
 # --- Hàm xoá toàn bộ proxy/IPv6 cũ ---
 clear_proxy_and_file() {
     echo "[*] Xoá cấu hình và proxy cũ..."
-    echo "" > "$CFG3PROXY"
-    echo "" > "$WORKDATA"
-    echo "" > "$PROXYTXT"
+    > "$CFG3PROXY"
+    > "$WORKDATA"
+    > "$PROXYTXT"
 
     if [[ -x "${WORKDIR}/boot_ifconfig_delete.sh" ]]; then
-        bash "${WORKDIR}/boot_ifconfig_delete.sh"
+        bash "${WORKDIR}/boot_ifconfig_delete.sh" || echo "[!] Không thể xóa IPv6 cũ."
     fi
 
     pkill -9 3proxy 2>/dev/null || true
 
-    # Trên CentOS 7.9: restart service network để IPv6 cũ được giải phóng
-    service network restart 2>/dev/null || true
-
-    echo "" > "${WORKDIR}/boot_ifconfig.sh"
+    # Làm mới interface mạng thay vì restart toàn bộ network
+    ip link set "$IFACE" down
+    sleep 1
+    ip link set "$IFACE" up
 }
 
 # --- Sinh chuỗi ngẫu nhiên ---
@@ -44,7 +50,7 @@ gen64() {
 gen_3proxy() {
     cat <<EOF
 daemon
-maxconn 1000
+maxconn 2000
 nscache 65536
 timeouts 1 5 30 60 180 1800 15 60
 setgid 65535
@@ -78,12 +84,22 @@ gen_ifconfig_delete() {
     awk -F "/" -v iface="$IFACE" '{print "ip -6 addr del " $5 "/64 dev " iface}' "$WORKDATA"
 }
 
-# === Bắt đầu ===
+# --- Kiểm tra firewall ---
+check_firewall() {
+    echo "[*] Mở các cổng trong iptables..."
+    seq "$FIRST_PORT" "$LAST_PORT" | while read -r port; do
+        iptables -D INPUT -p tcp --dport "$port" -m state --state NEW -j ACCEPT 2>/dev/null || true
+        iptables -A INPUT -p tcp --dport "$port" -m state --state NEW -j ACCEPT
+    done
+    service iptables save 2>/dev/null || true
+}
 
+# === Bắt đầu ===
+check_requirements
 mkdir -p "$WORKDIR"
 clear_proxy_and_file
 
-# 3) Lấy IPv4 và prefix IPv6 /64
+# Lấy IPv4 và prefix IPv6 /64
 IP4=$(curl -4 -s icanhazip.com)
 IP6_FULL=$(curl -6 -s icanhazip.com)
 IP6_PREFIX=$(echo "$IP6_FULL" | cut -f1-4 -d':')
@@ -96,7 +112,7 @@ fi
 echo "[*] IPv4 hiện tại: $IP4"
 echo "[*] IPv6 Prefix: $IP6_PREFIX"
 
-# 4) Nhập COUNT từ người dùng
+# Nhập COUNT từ người dùng
 echo "How many proxy do you want to create?"
 read -r COUNT
 if ! [[ "$COUNT" =~ ^[0-9]+$ ]]; then
@@ -108,30 +124,33 @@ FIRST_PORT=10000
 LAST_PORT=$((FIRST_PORT + COUNT - 1))
 echo "[*] Phạm vi port: $FIRST_PORT đến $LAST_PORT"
 
-# 5) Sinh data.txt mới
+# Sinh data.txt mới
 echo "[*] Tạo data.txt mới..."
 > "$WORKDATA"
 gen_data >> "$WORKDATA"
 
-# 6) Sinh script gán/xóa IPv6
+# Sinh script gán/xóa IPv6
 gen_ifconfig > "$WORKDIR/boot_ifconfig.sh"
 gen_ifconfig_delete > "$WORKDIR/boot_ifconfig_delete.sh"
 chmod +x "$WORKDIR/boot_ifconfig.sh" "$WORKDIR/boot_ifconfig_delete.sh"
 
-# 7) Gán lại toàn bộ IPv6 mới lên interface
+# Gán lại toàn bộ IPv6 mới lên interface
 echo "[*] Gán IPv6 mới lên $IFACE..."
 bash "$WORKDIR/boot_ifconfig.sh"
 sleep 1
 
-# 8) Tạo lại file cấu hình 3proxy
+# Cập nhật firewall
+check_firewall
+
+# Tạo lại file cấu hình 3proxy
 echo "[*] Cập nhật file cấu hình 3proxy..."
 gen_3proxy > "$CFG3PROXY"
 chmod 644 "$CFG3PROXY"
 
-# 9) Restart 3proxy
+# Restart 3proxy
 echo "[*] Khởi động lại 3proxy..."
 ulimit -n 10048
-service 3proxy restart 2>/dev/null || systemctl restart 3proxy
+systemctl restart 3proxy
 
 if pgrep -f 3proxy >/dev/null; then
     echo "✅ 3proxy đã chạy."
@@ -140,7 +159,7 @@ else
     exit 1
 fi
 
-# 10) Xuất proxy.txt để user tải về
+# Xuất proxy.txt để user tải về
 echo "[*] Tạo proxy.txt..."
 gen_proxy_file_for_user
 
