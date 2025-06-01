@@ -1,23 +1,20 @@
 #!/bin/bash
 
+WORKDIR="/home/proxy-installer"
+
 echo "[*] Dừng dịch vụ 3proxy nếu đang chạy..."
 systemctl stop 3proxy 2>/dev/null
 pkill -f 3proxy 2>/dev/null
 
-echo "[*] Xóa các rules iptables nếu có..."
-if [ -f /home/proxy-installer/boot_iptables_delete.sh ]; then
-    bash /home/proxy-installer/boot_iptables_delete.sh
-fi
+echo "[*] Xóa iptables rules và IPv6 cũ..."
+[ -f "$WORKDIR/boot_iptables_delete.sh" ] && bash "$WORKDIR/boot_iptables_delete.sh"
+[ -f "$WORKDIR/boot_ifconfig_delete.sh" ] && bash "$WORKDIR/boot_ifconfig_delete.sh"
 
-echo "[*] Xóa các địa chỉ IPv6 đã gán nếu có..."
-if [ -f /home/proxy-installer/boot_ifconfig_delete.sh ]; then
-    bash /home/proxy-installer/boot_ifconfig_delete.sh
-fi
+echo "[*] Xóa dữ liệu cũ nhưng giữ lại 3proxy..."
+rm -f "$WORKDIR"/{data.txt,proxy.txt}
+rm -f "$WORKDIR"/boot_{iptables,iptables_delete,ifconfig,ifconfig_delete}.sh
 
-echo "[*] Xóa dữ liệu proxy và cấu hình 3proxy..."
+echo "[*] Cấu hình /usr/local/etc/3proxy/3proxy.cfg được reset."
 > /usr/local/etc/3proxy/3proxy.cfg
-rm -rf /home/proxy-installer
-
-echo "[*] Đã xóa cấu hình proxy, iptables và địa chỉ IPv6, giữ nguyên 3proxy."
 
 echo "Delete Done"
