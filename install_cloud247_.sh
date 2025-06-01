@@ -31,7 +31,7 @@ install_3proxy() {
         return
     fi
     echo "Đang cài đặt 3proxy..."
-    URL="https://raw.githubusercontent.com/vudat1998/hdbhjbdsdsnkjsnkajsabkjd/main/3proxy-3proxy-0.9.4.tar.gz"
+    URL="https://raw.githubusercontent.com/vudat1998/Vinmmoproxy/main/3proxy-3proxy-0.9.4.tar.gz"
     yum install -y gcc bsdtar make net-tools zip >/dev/null
     wget -qO- $URL | bsdtar -xvf-
     cd 3proxy-0.9.4 || exit
