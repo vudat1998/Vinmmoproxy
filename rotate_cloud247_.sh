@@ -97,7 +97,7 @@ IP6=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
 echo "[*] IPv4 hiện tại: ${IP4}"
 echo "[*] IPv6 Prefix: ${IP6}"
 
-echo "Số lượng proxy cần tạo là bao nhiêu?"
+echo "How many proxy do you want to create?"
 read -r COUNT
 
 FIRST_PORT=10000
