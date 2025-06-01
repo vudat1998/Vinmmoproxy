@@ -1,10 +1,10 @@
-#!/bin/bashMore actions
+#!/bin/bash
 
 WORKDIR="/home/proxy-installer"
 WORKDATA="${WORKDIR}/data.txt"
 IFACE=$(ip -o -4 route show to default | awk '{print $5}')
 
-# Hàm xoá tất cả proxy hiện tại
+# Ham xoa tat ca proxy hien tai
 clear_proxy_and_file() {
     echo "" > /usr/local/etc/3proxy/3proxy.cfg
     echo "" > $WORKDIR/data.txt
@@ -19,13 +19,13 @@ clear_proxy_and_file() {
     echo "" > ${WORKDIR}/boot_ifconfig.sh
 }
 
-# Hàm sinh chuỗi ngẫu nhiên
+# Ham sinh chuoi ngau nhien
 random() {
     tr </dev/urandom -dc A-Za-z0-9 | head -c5
     echo
 }
 
-# Sinh địa chỉ IPv6 ngẫu nhiên từ subnet
+# Sinh dia chi IPv6 ngau nhien tu subnet
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
 gen64() {
     ip64() {
@@ -34,7 +34,7 @@ gen64() {
     echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
 }
 
-# Sinh cấu hình 3proxy
+# Sinh cau hinh 3proxy
 gen_3proxy() {
     cat <<EOF
 daemon
@@ -50,29 +50,29 @@ $(awk -F "/" '{print "auth strong\nallow " $1 "\nproxy -6 -n -a -p" $4 " -i" $3 
 EOF
 }
 
-# Ghi danh sách proxy vào file để người dùng sử dụng
+# Ghi danh sach proxy vao file de nguoi dung su dung
 gen_proxy_file_for_user() {
     awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2 }' ${WORKDATA} > "$WORKDIR/proxy.txt"
 }
 
-# Tạo dữ liệu ngẫu nhiên cho proxy
+# Tao du lieu ngau nhien cho proxy
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read -r port; do
         echo "usr$(random)/pass$(random)/$IP4/$port/$(gen64 $IP6)"
     done
 }
 
-# Tạo script cấu hình địa chỉ IPv6
+# Tao script cau hinh dia chi IPv6
 gen_ifconfig() {
     awk -F "/" -v iface="$IFACE" '{print "ip -6 addr add " $5 "/64 dev " iface}' ${WORKDATA}
 }
 
-# Tạo script xóa địa chỉ IPv6
+# Tao script xoa dia chi IPv6
 gen_ifconfig_delete() {
     awk -F "/" -v iface="$IFACE" '{print "ip -6 addr del " $5 "/64 dev " iface}' ${WORKDATA}
 }
 
-# --- Bắt đầu thực thi ---
+# --- Bat dau thuc thi ---
 mkdir -p "$WORKDIR"
 clear_proxy_and_file
 
@@ -86,29 +86,29 @@ read COUNT
 FIRST_PORT=10000
 LAST_PORT=$(($FIRST_PORT + $COUNT - 1))
 
-# Tạo dữ liệu proxy
+# Tao du lieu proxy
 gen_data > "${WORKDATA}"
 
-# Tạo script ifconfig thêm/xóa
+# Tao script ifconfig them/xoa
 gen_ifconfig > "${WORKDIR}/boot_ifconfig.sh"
 gen_ifconfig_delete > "${WORKDIR}/boot_ifconfig_delete.sh"
 chmod +x "${WORKDIR}/boot_ifconfig.sh" "${WORKDIR}/boot_ifconfig_delete.sh"
 
-# Tạo file cấu hình 3proxy
+# Tao file cau hinh 3proxy
 gen_3proxy > /usr/local/etc/3proxy/3proxy.cfg
 
-# Thêm IPv6 vào interface
+# Them IPv6 vao interface
 bash "${WORKDIR}/boot_ifconfig.sh"
 
-# Khởi động lại 3proxy
+# Khoi dong lai 3proxy
 ulimit -n 10048
 systemctl daemon-reload
 systemctl restart 3proxy
 
-# Ghi file cho người dùng
+# Ghi file cho nguoi dung
 gen_proxy_file_for_user
 
-echo "✅ Xoay proxy thành công!"
-echo "- Danh sách proxy: $WORKDIR/proxy.txt"
-echo "- Chạy lại IPv6 khi reboot: bash ${WORKDIR}/boot_ifconfig.sh"
+echo "✅ Xoay proxy thanh cong!"
+echo "- Danh sach proxy: $WORKDIR/proxy.txt"
+echo "- Chay lai IPv6 khi reboot: bash ${WORKDIR}/boot_ifconfig.sh"
 echo "Rotate Done"
