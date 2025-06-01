@@ -106,7 +106,7 @@ bash "${WORKDIR}/boot_ifconfig.sh"
 
 if [ ! -f /usr/local/etc/3proxy/bin/3proxy ]; then
     echo "==> Cài đặt 3proxy v0.9.4"
-    THIRD_URL="https://raw.githubusercontent.com/vudat1998/hdbhjbdsdsnkjsnkajsabkjd/main/3proxy-3proxy-0.9.4.tar.gz"
+    THIRD_URL="https://raw.githubusercontent.com/vudat1998/Vinmmoproxy/main/3proxy-3proxy-0.9.4.tar.gz"
     wget -qO- "$THIRD_URL" | bsdtar -xvf- >/dev/null
     cd 3proxy-0.9.4
     make -f Makefile.Linux
